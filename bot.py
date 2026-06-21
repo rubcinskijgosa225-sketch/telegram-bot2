@@ -1,4 +1,4 @@
-﻿import html
+import html
 import json
 import mimetypes
 import os
@@ -29,7 +29,6 @@ REQUESTS_FILE = DATA_DIR / "balance_requests.json"
 ADMINS_FILE = DATA_DIR / "admins.json"
 REFERRALS_FILE = DATA_DIR / "referrals.json"
 USER_SETTINGS_FILE = DATA_DIR / "user_settings.json"
-WEBHOOK_PATH = "/telegram-webhook"
 
 CONFIG = {}
 SESSIONS = {}
@@ -213,42 +212,19 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot is running")
 
-    def do_POST(self):
-        if self.path.split("?", 1)[0] != WEBHOOK_PATH:
-            self.send_response(404)
-            self.end_headers()
-            return
-
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            update = json.loads(self.rfile.read(length).decode("utf-8"))
-            handle_update(update)
-        except Exception as error:
-            print(f"Webhook update error: {error}")
-
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(b"OK")
-
     def log_message(self, format, *args):
         return
 
 
-def start_render_health_server(block=False):
+def start_render_health_server():
     port = os.environ.get("PORT")
     if not port:
-        return None
+        return
 
     server = HTTPServer(("0.0.0.0", int(port)), HealthCheckHandler)
-    print(f"Health check server is listening on port {port}.")
-    if block:
-        server.serve_forever()
-        return server
-
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    return server
+    print(f"Health check server is listening on port {port}.")
 
 
 def main():
@@ -261,46 +237,10 @@ def main():
         print("Set BOT_TOKEN in .env or settings.py first.")
         return
 
-    webhook_url = telegram_webhook_url()
-    if webhook_url:
-        setup_telegram_webhook(webhook_url)
-        print("EscrowVault Python bot is running in webhook mode.")
-        start_render_health_server(block=True)
-        return
-
     reset_telegram_updates()
-    start_render_health_server(block=False)
+    start_render_health_server()
     print("EscrowVault Python bot is running.")
     run_long_polling()
-
-
-def telegram_webhook_url():
-    raw_url = CONFIG.get("WEBHOOK_URL") or CONFIG.get("PUBLIC_URL") or CONFIG.get("RAILWAY_PUBLIC_DOMAIN")
-    if not raw_url:
-        return ""
-
-    url = str(raw_url).strip()
-    if not url:
-        return ""
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
-    url = url.rstrip("/")
-    if not url.endswith(WEBHOOK_PATH):
-        url += WEBHOOK_PATH
-    return url
-
-
-def setup_telegram_webhook(webhook_url):
-    try:
-        api("setWebhook", {
-            "url": webhook_url,
-            "drop_pending_updates": True,
-            "allowed_updates": ["message", "callback_query"],
-        })
-        print(f"Telegram webhook is set to {webhook_url}.")
-    except RuntimeError as error:
-        print(f"Could not set Telegram webhook: {error}")
-        raise
 
 
 def reset_telegram_updates():
@@ -2556,6 +2496,7 @@ def send_main_menu(chat_id, session):
 
 if __name__ == "__main__":
     main()
+
 
 
 
