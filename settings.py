@@ -1,0 +1,32 @@
+BOT_TOKEN = "8933759941:AAHjBV2s3jVoS7xuz-gWcFWSEkzYB5tEf8s"
+BOT_USERNAME = "@goierfdsfBot"
+WELCOME_IMAGE_PATH = "assets/welcome.png"
+ESCROW_ACCOUNT = "@EscrowVaultSupport"
+OWNER_ID="850029996"
+SUPPORT_USERNAME="@EscrowVaultSupport"
+# Requisites. If a currency requisite is empty, order creation will stop and ask the user to add it.
+TON_ADDRESS = ""
+USDT_TON_ADDRESS = ""
+STARS_RECEIVER = ""
+CARD_SPB_REQUISITES = ""
+
+# Telegram Premium / custom emoji ids.
+# Use /emoji in the bot to collect ids, then paste them here.
+EMOJI_GIFT = ""
+EMOJI_SHIELD = ""
+EMOJI_STAR = ""
+EMOJI_CHECK = ""
+EMOJI_CROSS = ""
+EMOJI_WARN = ""
+EMOJI_SUPPORT = ""
+
+# Premium emoji for the start menu.
+EMOJI_WELCOME = "5458881760811049828"
+EMOJI_SERVICE = "5433776470080107054"
+EMOJI_SPEED = "5258332798409783582"
+EMOJI_AUTO = "5246734896356936944"
+EMOJI_STEP_1 = "5794164805065514131"
+EMOJI_STEP_2 = "5794085322400733645"
+EMOJI_STEP_3 = "5794280000383358988"
+EMOJI_STEP_4 = "5794241397217304511"
+EMOJI_DOWN = "5454172127307523969"
