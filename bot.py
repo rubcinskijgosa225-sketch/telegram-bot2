@@ -34,7 +34,7 @@ CONFIG = {}
 SESSIONS = {}
 CALLBACK_DEDUP = {}
 OFFSET = 0
-CURRENCIES = ("STARS", "TON", "USDT_TON", "RUB", "UAH", "USD", "BYN")
+CURRENCIES = ("STARS", "TON", "USDT_TON", "RUB", "UAH", "USD", "BYN", "KZT")
 CALLBACK_DEDUP_SECONDS = 2.0
 
 CURRENCY_EMOJI_IDS = {
@@ -45,6 +45,7 @@ CURRENCY_EMOJI_IDS = {
     "UAH": ("5399910841929709976", "🤑"),
     "USD": ("5213071887583692797", "💵"),
     "BYN": ("5296459459319575382", "💰"),
+    "KZT": ("5233426484923750391", "💵"),
 }
 
 REQUISITE_EMOJI_IDS = {
@@ -87,6 +88,7 @@ BUTTON_EMOJI_IDS = {
     "currency_uah": "5399910841929709976",
     "currency_usd": "5213071887583692797",
     "currency_byn": "5296459459319575382",
+    "currency_kzt": "5233426484923750391",
     "share_order": "5458872002645353776",
     "cancel_order": "5454010941479873740",
 }
@@ -194,6 +196,18 @@ def tr(chat_id, ru, en):
 
 def tr_session(session, ru, en):
     return en if lang_for(session=session) == "en" else ru
+
+
+def role_label(role, chat_id=None):
+    if role == "seller":
+        return tr(chat_id, "продавец", "seller")
+    if role == "buyer":
+        return tr(chat_id, "покупатель", "buyer")
+    return tr(chat_id, "не указана", "not specified")
+
+
+def counterparty_role_label(role, chat_id=None):
+    return role_label("buyer" if role == "seller" else "seller", chat_id)
 
 
 def back_button(callback_data, text=None, style="primary", chat_id=None):
@@ -330,6 +344,10 @@ def handle_update(update):
         send_text(chat_id, emoji_diagnostic_text(), {"parse_mode": "HTML"})
         return
 
+    if has_custom_emoji(message) and session.get("step") not in ("recipient_username", "order_amount", "description", "bind_requisite", "balance_amount"):
+        collect_emoji(message)
+        return
+
     if session.get("step") == "recipient_username":
         handle_recipient_input(message, session, text)
         return
@@ -416,8 +434,8 @@ def handle_callback(query):
         handle_rate_user(chat_id, data)
         return
 
-    if data in ("lang_ru", "lang_en"):
-        session["lang"] = "ru" if data == "lang_ru" else "en"
+    if data in ("lang_ru", "lang_en", "lang_ar", "lang_zh", "lang_ja", "lang_kk"):
+        session["lang"] = data.removeprefix("lang_")
         set_user_language(chat_id, session["lang"])
         session["step"] = "menu"
         send_welcome(chat_id, session)
@@ -458,7 +476,7 @@ def handle_callback(query):
         if not has_requisites(chat_id, "CARD_SPB"):
             send_missing_requisites(chat_id, session)
             return
-        ask_recipient(chat_id, session)
+        ask_order_amount(chat_id, session)
         return
     if data.startswith("currency:"):
         currency = data.split(":", 1)[1]
@@ -466,7 +484,7 @@ def handle_callback(query):
         if not has_requisites(chat_id, currency):
             send_missing_requisites(chat_id, session)
             return
-        ask_recipient(chat_id, session)
+        ask_order_amount(chat_id, session)
         return
 
     if data == "deposit_withdraw":
@@ -614,10 +632,20 @@ def send_language_select(chat_id):
     send_text(chat_id, "<b>EscrowVault</b>\n\nВыберите язык / Choose language", {
         "parse_mode": "HTML",
         "reply_markup": {
-            "inline_keyboard": [[
-                icon_button("Русский", "lang_ru", callback_data="lang_ru"),
-                icon_button("English", "lang_en", callback_data="lang_en"),
-            ]]
+            "inline_keyboard": [
+                [
+                    icon_button("🇷🇺 Русский", "lang_ru", callback_data="lang_ru"),
+                    icon_button("🇬🇧 English", "lang_en", callback_data="lang_en"),
+                ],
+                [
+                    icon_button("🇸🇦 العربية", "lang_ar", callback_data="lang_ar"),
+                    icon_button("🇨🇳 中文", "lang_zh", callback_data="lang_zh"),
+                ],
+                [
+                    icon_button("🇯🇵 日本語", "lang_ja", callback_data="lang_ja"),
+                    icon_button("🇰🇿 Қазақша", "lang_kk", callback_data="lang_kk"),
+                ],
+            ]
         },
     })
 
@@ -723,6 +751,7 @@ def send_fiat_select(chat_id, session, mode):
                     icon_button("USD", "currency_usd", callback_data=prefix + "USD"),
                     icon_button("BYN", "currency_byn", callback_data=prefix + "BYN"),
                 ],
+                [icon_button("KZT", "currency_kzt", callback_data=prefix + "KZT")],
                 [back_button(back, chat_id=chat_id)],
             ]
         },
@@ -736,6 +765,16 @@ def ask_recipient(chat_id, session):
         f"<b>{recipient_title(order.get('product'))}</b>\n\n",
         tr(chat_id, "Укажите <code>@username</code> получателя\n\n", "Enter the recipient <code>@username</code>\n\n"),
         quote_block("⭐", min_text(order.get("currency"), order.get("fiat"), chat_id)),
+    ])
+    send_text(chat_id, text, {"parse_mode": "HTML", **back_keyboard("menu", chat_id)})
+
+
+def ask_order_amount(chat_id, session):
+    session["order"].pop("recipient", None)
+    session["step"] = "order_amount"
+    text = "".join([
+        f"{order_emoji('amount')} <b>{tr(chat_id, 'Введите сумму сделки', 'Enter the deal amount')}</b>\n\n",
+        quote_block("⭐", min_text(session["order"].get("currency"), session["order"].get("fiat"), chat_id)),
     ])
     send_text(chat_id, text, {"parse_mode": "HTML", **back_keyboard("menu", chat_id)})
 
@@ -769,19 +808,16 @@ def handle_amount_input(message, session, text):
 
     session["order"]["amount"] = clean_amount(amount)
     session["step"] = "description"
-    product = session["order"].get("product")
-    examples = {
-        "nft_gift": tr(chat_id, "Пример: https://t.me/nft/pepe", "Example: https://t.me/nft/pepe"),
-        "nft_username": tr(chat_id, "Пример: https://t.me/nft/example", "Example: https://t.me/nft/example"),
-        "stars": tr(chat_id, "Пример: 1000 звезд на @username", "Example: 1000 Stars to @username"),
-        "ton": tr(chat_id, "Пример: 5 TON на указанный TON-адрес", "Example: 5 TON to the specified TON address"),
-        "telegram_premium": tr(chat_id, "Пример: Telegram Premium на 3 месяца", "Example: Telegram Premium for 3 months"),
-    }
-    example = examples.get(product, tr(chat_id, "Пример: описание товара или услуги", "Example: product or service description"))
-
     send_text(chat_id, "".join([
-        tr(chat_id, "<b>Описание товара</b>\n\n", "<b>Product description</b>\n\n"),
-        f"<i>{html.escape(example)}</i>",
+        f"{order_emoji('description')} <b>{tr(chat_id, 'Отправьте описание сделки', 'Send the deal description')}</b>\n\n",
+        "<blockquote>",
+        tr(
+            chat_id,
+            "Если товар NFT — отправьте ссылку на него:\n<code>https://t.me/nft/PlushPepe-2133</code>",
+            "If the item is an NFT, send its link:\n<code>https://t.me/nft/PlushPepe-2133</code>",
+        ),
+        "</blockquote>\n\n",
+        f"<i>{tr(chat_id, 'Можно также написать обычное описание: NFT календарь', 'You can also write a plain description: NFT calendar')}</i>",
     ]), {
         "parse_mode": "HTML",
         **back_keyboard("menu", chat_id),
@@ -794,27 +830,11 @@ def is_nft_link(value):
 
 
 def product_description_example(product):
-    examples = {
-        "nft_gift": "https://t.me/nft/pepe",
-        "nft_username": "https://t.me/nft/example",
-        "stars": "1000 Stars to @username",
-        "ton": "5 TON на указанный TON-адрес",
-        "telegram_premium": "Telegram Premium for 3 months",
-    }
-    return examples.get(product, "описание товара или услуги")
+    return "NFT календарь или https://t.me/nft/PlushPepe-2133"
 
 
 def is_valid_product_description(product, value):
     text = str(value or "").strip()
-    lowered = text.lower()
-    if product in ("nft_gift", "nft_username"):
-        return is_nft_link(text)
-    if product == "stars":
-        return bool(re.search(r"\d", text)) and ("звезд" in lowered or "stars" in lowered or "⭐" in text) and "@" in text
-    if product == "ton":
-        return bool(re.search(r"\d", text)) and "ton" in lowered
-    if product == "telegram_premium":
-        return "premium" in lowered and bool(re.search(r"\d", text))
     return len(text) >= 3
 
 
@@ -824,7 +844,7 @@ def handle_description_input(message, session, text):
     product = order.get("product")
     if not is_valid_product_description(product, text):
         example = product_description_example(product)
-        send_text(chat_id, tr(chat_id, f"<b>Неправильный ввод.</b>\n\nОтправьте описание в формате:\n<code>{html.escape(example)}</code>", f"<b>Invalid input.</b>\n\nSend the description in this format:\n<code>{html.escape(example)}</code>"), {
+        send_text(chat_id, tr(chat_id, f"<b>Описание слишком короткое.</b>\n\nНапишите минимум 3 символа. Например:\n<code>{html.escape(example)}</code>", f"<b>Description is too short.</b>\n\nWrite at least 3 characters. Example:\n<code>{html.escape(example)}</code>"), {
             "parse_mode": "HTML",
             **back_keyboard("menu", chat_id),
         })
@@ -862,10 +882,10 @@ def handle_description_input(message, session, text):
 
     text_out = "".join([
         f"{order_emoji('created')} {tr(chat_id, 'ордер создан', 'order created')}: <code>{html.escape(order_id)}</code>\n\n",
-        f"{order_emoji('buyer')} {tr(chat_id, 'username покупателя', 'buyer username')}: {html.escape(order.get('recipient') or tr(chat_id, 'не указан', 'not specified'))}\n",
+        f"{order_emoji('owner')} {tr(chat_id, 'Ваша роль', 'Your role')}: {html.escape(role_label(role, chat_id))}\n",
         f"{order_emoji('amount')} <b>{tr(chat_id, 'Сумма', 'Amount')}:</b> {price_text_html(order.get('amount'), order.get('currency'), order.get('fiat'))}\n",
         f"{order_emoji('description')} <b>{tr(chat_id, 'Описание', 'Description')}:</b> {html.escape(text)}\n\n",
-        f"{order_emoji('link')} <b>{tr(chat_id, 'Ссылка для покупателя', 'Link for the buyer')}:</b>\n\n",
+        f"{order_emoji('link')} <b>{tr(chat_id, 'Ссылка для участника', 'Link for the participant')} ({html.escape(counterparty_role_label(role, chat_id))}):</b>\n\n",
         f"{html.escape(link)}\n\n",
         "<blockquote>",
         f"{order_emoji('important')} <i>{tr(chat_id, 'Важно: передача подарка выполняется через менеджера', 'Important: the gift transfer is handled through the manager')}\n{html.escape(escrow_account())}</i>\n",
@@ -1259,6 +1279,7 @@ def send_balance_list(chat_id):
         "UAH": "UAH",
         "USD": "USD",
         "BYN": "BYN",
+        "KZT": "KZT",
     }
     lines = [f"<b>{tr(chat_id, 'Ваш баланс', 'Your balance')}:</b>", ""]
     for currency in CURRENCIES:
@@ -1663,7 +1684,7 @@ def withdraw_requisites(chat_id, currency):
         return requisites.get("usdt_ton_address", "")
     if currency == "STARS":
         return requisites.get("stars_receiver", "")
-    if currency in ("RUB", "UAH", "USD", "BYN"):
+    if currency in ("RUB", "UAH", "USD", "BYN", "KZT"):
         return requisites.get("card_spb_requisites", "")
     return ""
 
@@ -1850,7 +1871,14 @@ def collect_emoji(message):
         set_name = sticker.get("set_name") or "unknown_set"
         lines.append(f"{index}. {base_emoji} custom_emoji_id={emoji_id} / {set_name}")
 
-    send_text(message["chat"]["id"], "Нашел premium/custom emoji:\n" + "\n".join(lines) + "\n\nВставь нужные ID в settings.py.")
+    chat_id = message["chat"]["id"]
+    get_session(chat_id)["step"] = "menu"
+    send_text(chat_id, "Нашел premium/custom emoji:\n" + "\n".join(lines) + "\n\nВставь нужные ID в settings.py.")
+
+
+def has_custom_emoji(message):
+    entities = list(message.get("entities", [])) + list(message.get("caption_entities", []))
+    return any(entity.get("type") == "custom_emoji" and entity.get("custom_emoji_id") for entity in entities)
 
 def emoji_diagnostic_text():
     keys = [
@@ -2496,17 +2524,6 @@ def send_main_menu(chat_id, session):
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
 
 
 
