@@ -29,6 +29,7 @@ REQUESTS_FILE = DATA_DIR / "balance_requests.json"
 ADMINS_FILE = DATA_DIR / "admins.json"
 REFERRALS_FILE = DATA_DIR / "referrals.json"
 USER_SETTINGS_FILE = DATA_DIR / "user_settings.json"
+TRANSLATIONS_FILE = DATA_DIR / "translations.json"
 
 CONFIG = {}
 SESSIONS = {}
@@ -36,6 +37,58 @@ CALLBACK_DEDUP = {}
 OFFSET = 0
 CURRENCIES = ("STARS", "TON", "USDT_TON", "RUB", "UAH", "USD", "BYN", "KZT")
 CALLBACK_DEDUP_SECONDS = 2.0
+SUPPORTED_LANGUAGES = {
+    "ru": {"name": "Русский", "target": "ru"},
+    "en": {"name": "English", "target": "en"},
+    "ar": {"name": "العربية", "target": "ar"},
+    "zh": {"name": "中文", "target": "zh-CN"},
+    "ja": {"name": "日本語", "target": "ja"},
+    "kk": {"name": "Қазақша", "target": "kk"},
+}
+WELCOME_TRANSLATIONS = {
+    "ar": {
+        "welcome": "أهلاً بك!",
+        "service": "EscrowVault خدمة متخصصة لضمان أمان الصفقات خارج البورصة.",
+        "auto": "تنفيذ آلي للصفقات. سحب مريح وسريع للأموال.",
+        "step_1": "صفقات آلية للرموز غير القابلة للاستبدال والهدايا.",
+        "step_2": "حماية كاملة للطرفين.",
+        "step_3": "يتم تجميد الأموال حتى التأكيد.",
+        "step_4": "التحويل عبر المدير: {manager}",
+        "choose": "اختر إجراءً أدناه",
+    },
+    "zh": {
+        "welcome": "欢迎！",
+        "service": "EscrowVault 是保障场外交易安全的专业服务。",
+        "auto": "自动化执行流程，便捷快速提现。",
+        "step_1": "NFT 和礼物的自动交易。",
+        "step_2": "全面保护交易双方。",
+        "step_3": "资金将在确认前被冻结。",
+        "step_4": "通过经理转交：{manager}",
+        "choose": "请选择下方操作",
+    },
+    "ja": {
+        "welcome": "ようこそ！",
+        "service": "EscrowVaultは、OTC取引の安全を確保する専門サービスです。",
+        "auto": "自動実行フロー。便利で迅速な出金。",
+        "step_1": "NFTとギフトの自動取引。",
+        "step_2": "双方を完全に保護します。",
+        "step_3": "確認されるまで資金は保留されます。",
+        "step_4": "マネージャーを通じた送付：{manager}",
+        "choose": "下の操作を選択してください",
+    },
+    "kk": {
+        "welcome": "Қош келдіңіз!",
+        "service": "EscrowVault — биржадан тыс мәмілелердің қауіпсіздігін қамтамасыз ететін мамандандырылған сервис.",
+        "auto": "Автоматтандырылған орындау алгоритмі. Ыңғайлы және жылдам қаражат шығару.",
+        "step_1": "NFT және сыйлықтармен автоматты мәмілелер.",
+        "step_2": "Екі тараптың да толық қорғанысы.",
+        "step_3": "Қаражат расталғанға дейін бұғатталады.",
+        "step_4": "Менеджер арқылы беру: {manager}",
+        "choose": "Төмендегі әрекетті таңдаңыз",
+    },
+}
+TRANSLATION_CACHE = {}
+TRANSLATION_LOCK = threading.Lock()
 
 CURRENCY_EMOJI_IDS = {
     "STARS": ("5920101247708303325", "⭐"),
@@ -45,7 +98,7 @@ CURRENCY_EMOJI_IDS = {
     "UAH": ("5399910841929709976", "🤑"),
     "USD": ("5213071887583692797", "💵"),
     "BYN": ("5296459459319575382", "💰"),
-    "KZT": ("5233426484923750391", "💵"),
+    "KZT": ("5364045318092504570", "₸"),
 }
 
 REQUISITE_EMOJI_IDS = {
@@ -66,8 +119,12 @@ BUTTON_EMOJI_IDS = {
     "bind_card_spb": "5769126056262898415",
     "bind_username": "5323333018151045958",
     "requisites": "5454134258580877567",
-    "lang_ru": "5217591619108233553",
-    "lang_en": "5434076031164103400",
+    "lang_ru": "5449408995691341691",
+    "lang_en": "5202021044105257611",
+    "lang_ar": "5202079966761590204",
+    "lang_zh": "5431782733376399004",
+    "lang_ja": "5456261908069885892",
+    "lang_kk": "5228718354658769982",
     "check_balance": "5920332557466997677",
     "support": "5454068128969417666",
     "transfer_to_manager": "5453960484204083655",
@@ -88,7 +145,7 @@ BUTTON_EMOJI_IDS = {
     "currency_uah": "5399910841929709976",
     "currency_usd": "5213071887583692797",
     "currency_byn": "5296459459319575382",
-    "currency_kzt": "5233426484923750391",
+    "currency_kzt": "5364045318092504570",
     "share_order": "5458872002645353776",
     "cancel_order": "5454010941479873740",
 }
@@ -190,12 +247,73 @@ def lang_for(chat_id=None, session=None):
     return "ru"
 
 
+def load_translation_cache():
+    """Load machine-translated UI strings saved after previous bot runs."""
+    global TRANSLATION_CACHE
+    TRANSLATION_CACHE = load_json(TRANSLATIONS_FILE, {})
+    if not isinstance(TRANSLATION_CACHE, dict):
+        TRANSLATION_CACHE = {}
+
+
+def translate_ui_text(text, lang):
+    """Translate an existing English UI string and cache it persistently.
+
+    Russian and English are authored in the source.  The other four language
+    packs are generated through Google Translate's public endpoint and cached
+    locally, so every existing and newly added `tr()` string is covered without
+    maintaining several copies of the bot screens by hand.
+    """
+    if lang in ("ru", "en") or not text:
+        return text
+
+    target = SUPPORTED_LANGUAGES.get(lang, {}).get("target")
+    if not target:
+        return text
+
+    key = str(text)
+    with TRANSLATION_LOCK:
+        cached = TRANSLATION_CACHE.get(lang, {}).get(key)
+    if cached:
+        return cached
+
+    try:
+        params = urllib.parse.urlencode({
+            "client": "gtx", "sl": "en", "tl": target, "dt": "t",
+            "format": "html", "q": key,
+        })
+        url = "https://translate.googleapis.com/translate_a/single?" + params
+        with urllib.request.urlopen(url, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        translated = "".join(part[0] for part in payload[0] if part and part[0])
+        if not translated:
+            return text
+    except (OSError, ValueError, TypeError, IndexError):
+        # The bot remains usable if the translation service is temporarily
+        # unavailable; English is a safe fallback for that one string.
+        return text
+
+    with TRANSLATION_LOCK:
+        TRANSLATION_CACHE.setdefault(lang, {})[key] = translated
+        save_json(TRANSLATIONS_FILE, TRANSLATION_CACHE)
+    return translated
+
+
 def tr(chat_id, ru, en):
-    return en if lang_for(chat_id) == "en" else ru
+    lang = lang_for(chat_id)
+    if lang == "ru":
+        return ru
+    if lang == "en":
+        return en
+    return translate_ui_text(en, lang)
 
 
 def tr_session(session, ru, en):
-    return en if lang_for(session=session) == "en" else ru
+    lang = lang_for(session=session)
+    if lang == "ru":
+        return ru
+    if lang == "en":
+        return en
+    return translate_ui_text(en, lang)
 
 
 def role_label(role, chat_id=None):
@@ -245,6 +363,7 @@ def main():
     global CONFIG
 
     CONFIG = load_env(BASE_DIR / ".env")
+    load_translation_cache()
     token = CONFIG.get("BOT_TOKEN", "")
 
     if not token or "PUT_YOUR_TOKEN_HERE" in token:
@@ -629,21 +748,21 @@ def handle_admin_command(message, text):
 
 
 def send_language_select(chat_id):
-    send_text(chat_id, "<b>EscrowVault</b>\n\nВыберите язык / Choose language", {
+    send_text(chat_id, "<b>EscrowVault</b>\n\nВыберите язык / Choose language / اختر اللغة / 選擇語言 / 言語を選択 / Тілді таңдаңыз", {
         "parse_mode": "HTML",
         "reply_markup": {
             "inline_keyboard": [
                 [
-                    icon_button("🇷🇺 Русский", "lang_ru", callback_data="lang_ru"),
-                    icon_button("🇬🇧 English", "lang_en", callback_data="lang_en"),
+                    icon_button("Русский", "lang_ru", callback_data="lang_ru"),
+                    icon_button("English", "lang_en", callback_data="lang_en"),
                 ],
                 [
-                    icon_button("🇸🇦 العربية", "lang_ar", callback_data="lang_ar"),
-                    icon_button("🇨🇳 中文", "lang_zh", callback_data="lang_zh"),
+                    icon_button("\u200eالعربية", "lang_ar", callback_data="lang_ar"),
+                    icon_button("中文", "lang_zh", callback_data="lang_zh"),
                 ],
                 [
-                    icon_button("🇯🇵 日本語", "lang_ja", callback_data="lang_ja"),
-                    icon_button("🇰🇿 Қазақша", "lang_kk", callback_data="lang_kk"),
+                    icon_button("日本語", "lang_ja", callback_data="lang_ja"),
+                    icon_button("Қазақша", "lang_kk", callback_data="lang_kk"),
                 ],
             ]
         },
@@ -882,7 +1001,7 @@ def handle_description_input(message, session, text):
 
     text_out = "".join([
         f"{order_emoji('created')} {tr(chat_id, 'ордер создан', 'order created')}: <code>{html.escape(order_id)}</code>\n\n",
-        f"{order_emoji('owner')} {tr(chat_id, 'Ваша роль', 'Your role')}: {html.escape(role_label(role, chat_id))}\n",
+        f"{order_emoji('owner')} <b>{tr(chat_id, 'Ваша роль', 'Your role')}:</b> {html.escape(role_label(role, chat_id))}\n",
         f"{order_emoji('amount')} <b>{tr(chat_id, 'Сумма', 'Amount')}:</b> {price_text_html(order.get('amount'), order.get('currency'), order.get('fiat'))}\n",
         f"{order_emoji('description')} <b>{tr(chat_id, 'Описание', 'Description')}:</b> {html.escape(text)}\n\n",
         f"{order_emoji('link')} <b>{tr(chat_id, 'Ссылка для участника', 'Link for the participant')} ({html.escape(counterparty_role_label(role, chat_id))}):</b>\n\n",
@@ -1607,7 +1726,10 @@ def has_requisites(chat_id, currency):
     if currency == "USDT_TON":
         return bool(requisites.get("usdt_ton_address") or CONFIG.get("USDT_TON_ADDRESS"))
     if currency == "STARS":
-        return bool(requisites.get("stars_receiver") or CONFIG.get("STARS_RECEIVER"))
+        # Stars orders do not need a payout username before they are created.
+        # This prevents an NFT/Stars order from being interrupted by the
+        # requisites screen.
+        return True
     if currency == "CARD_SPB":
         return bool(requisites.get("card_spb_requisites") or CONFIG.get("CARD_SPB_REQUISITES"))
     return True
@@ -2115,7 +2237,7 @@ def make_request_id():
 
 
 def escrow_account():
-    return CONFIG.get("ESCROW_ACCOUNT") or "@EscrowManager"
+    return CONFIG.get("ESCROW_ACCOUNT") or "@EscrowVaultSupport"
 
 
 def manager_url():
@@ -2381,13 +2503,27 @@ CUSTOM_EMOJI_ALTS = {
     "EMOJI_DOWN": "🔛",
 }
 
+# Keep the welcome-screen design intact even if an environment variable or
+# settings.py value is absent in the running deployment.
+DEFAULT_PREMIUM_EMOJI_IDS = {
+    "EMOJI_WELCOME": "5458881760811049828",
+    "EMOJI_SERVICE": "5433776470080107054",
+    "EMOJI_SPEED": "5258332798409783582",
+    "EMOJI_AUTO": "5246734896356936944",
+    "EMOJI_STEP_1": "5794164805065514131",
+    "EMOJI_STEP_2": "5794085322400733645",
+    "EMOJI_STEP_3": "5794280000383358988",
+    "EMOJI_STEP_4": "5794241397217304511",
+    "EMOJI_DOWN": "5454172127307523969",
+}
+
 
 def clean_emoji_id(value):
     return str(value or "").strip().strip('"').strip("'")
 
 
 def premium_emoji(config_key, fallback):
-    emoji_id = clean_emoji_id(CONFIG.get(config_key, ""))
+    emoji_id = clean_emoji_id(CONFIG.get(config_key) or DEFAULT_PREMIUM_EMOJI_IDS.get(config_key, ""))
     alt = CONFIG.get(f"{config_key}_ALT") or CUSTOM_EMOJI_ALTS.get(config_key, fallback)
     if not emoji_id:
         return html.escape(alt)
@@ -2398,48 +2534,33 @@ def premium_quote(config_key, fallback, text):
     return f"<blockquote>{premium_emoji(config_key, fallback)} {html.escape(str(text))}</blockquote>"
 
 
+def welcome_tr(chat_id, key, ru, en, **values):
+    """Return an authored welcome-screen translation without network access."""
+    lang = lang_for(chat_id)
+    text = WELCOME_TRANSLATIONS.get(lang, {}).get(key)
+    if text is None:
+        text = tr(chat_id, ru, en)
+    return text.format(**values) if values else text
+
+
 def welcome_text(chat_id=None):
-    if lang_for(chat_id) == "en":
-        return "".join([
-            f"{premium_emoji('EMOJI_WELCOME', '👋')} <b>Welcome!</b>\n\n",
-            "<blockquote>",
-            f"{premium_emoji('EMOJI_SERVICE', '🏠')} EscrowVault is a specialized service for\n",
-            "secure OTC deals.\n",
-            f"{premium_emoji('EMOJI_AUTO', '🛡')} Automated execution flow. Convenient and\n",
-            "fast withdrawals",
-            "</blockquote>",
-            "\n\n",
-            premium_quote("EMOJI_STEP_1", "1", "Automated deals with NFTs and gifts."),
-            "\n",
-            premium_quote("EMOJI_STEP_2", "2", "Full protection for both sides."),
-            "\n",
-            premium_quote("EMOJI_STEP_3", "3", "Funds are locked until confirmation."),
-            "\n",
-            premium_quote("EMOJI_STEP_4", "4", f"Transfer through the manager: {escrow_account()}"),
-            "\n\n",
-            "<blockquote>",
-            f"<b>Choose an action below</b> {premium_emoji('EMOJI_DOWN', '⬇️')}",
-            "</blockquote>",
-        ])
     return "".join([
-        f"{premium_emoji('EMOJI_WELCOME', '👋')} <b>Добро пожаловать!</b>\n\n",
+        f"{premium_emoji('EMOJI_WELCOME', '👋')} <b>{welcome_tr(chat_id, 'welcome', 'Добро пожаловать!', 'Welcome!')}</b>\n\n",
         "<blockquote>",
-        f"{premium_emoji('EMOJI_SERVICE', '🏠')} EscrowVault — специализированный сервис по\n",
-        "обеспечению безопасности внебиржевых сделок.\n",
-        f"{premium_emoji('EMOJI_AUTO', '🛡')} Автоматизированный алгоритм исполнения. Удобный и\n",
-        "быстрый вывод средств",
+        f"{premium_emoji('EMOJI_SERVICE', '🏠')} {welcome_tr(chat_id, 'service', 'EscrowVault — специализированный сервис по\nобеспечению безопасности внебиржевых сделок.', 'EscrowVault is a specialized service for\nsecure OTC deals.')}\n",
+        f"{premium_emoji('EMOJI_AUTO', '🛡')} {welcome_tr(chat_id, 'auto', 'Автоматизированный алгоритм исполнения. Удобный и\nбыстрый вывод средств', 'Automated execution flow. Convenient and\nfast withdrawals')}",
         "</blockquote>",
         "\n\n",
-        premium_quote("EMOJI_STEP_1", "1", "Автоматические сделки с NFT и подарками."),
+        premium_quote("EMOJI_STEP_1", "1", welcome_tr(chat_id, "step_1", "Автоматические сделки с NFT и подарками.", "Automated deals with NFTs and gifts.")),
         "\n",
-        premium_quote("EMOJI_STEP_2", "2", "Полная защита обеих сторон."),
+        premium_quote("EMOJI_STEP_2", "2", welcome_tr(chat_id, "step_2", "Полная защита обеих сторон.", "Full protection for both sides.")),
         "\n",
-        premium_quote("EMOJI_STEP_3", "3", "Средства заморожены до подтверждения."),
+        premium_quote("EMOJI_STEP_3", "3", welcome_tr(chat_id, "step_3", "Средства заморожены до подтверждения.", "Funds are locked until confirmation.")),
         "\n",
-        premium_quote("EMOJI_STEP_4", "4", f"Передача через менеджера: {escrow_account()}"),
+        premium_quote("EMOJI_STEP_4", "4", welcome_tr(chat_id, "step_4", f"Передача через менеджера: {escrow_account()}", f"Transfer through the manager: {escrow_account()}", manager=escrow_account())),
         "\n\n",
         "<blockquote>",
-        f"<b>Выберите действие ниже</b> {premium_emoji('EMOJI_DOWN', '⬇️')}",
+        f"<b>{welcome_tr(chat_id, 'choose', 'Выберите действие ниже', 'Choose an action below')}</b> {premium_emoji('EMOJI_DOWN', '⬇️')}",
         "</blockquote>",
     ])
 
@@ -2524,16 +2645,6 @@ def send_main_menu(chat_id, session):
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
 
 
 
